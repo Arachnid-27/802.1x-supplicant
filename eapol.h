@@ -3,8 +3,8 @@
 #include <arpa/inet.h>
 #include <net/if.h>
 #include <string.h>
-#include <stdio.h>
 #include <unistd.h>
+#include <stdio.h>
 
 /**
  * Reference: RFC3748
@@ -49,17 +49,14 @@
  * +--------+--------+----------------+------------------------+
  */
 
-
 #define EAPOL_BUF_SIZE 2048
 
-typedef unsigned char uchar;
+static uint8_t eapol_buf[EAPOL_BUF_SIZE];
+static uint8_t eap_code, eap_id, eap_type;
+static uint8_t *eap_packet;
+static int eap_length;
 
-uchar eapol_buf[EAPOL_BUF_SIZE];
-uchar eap_code, eap_id, eap_type;
-uchar *eap_packet;
-int eap_length;
-
-const char* get_eap_code() {
+static const char* get_eap_code() {
     switch (eap_code) {
         case EAP_CODE_REQUEST:
             return "Request";
@@ -73,7 +70,7 @@ const char* get_eap_code() {
     return "(unknown)";
 }
 
-const char* get_eap_type() {
+static const char* get_eap_type() {
     switch (eap_type) {
         case EAP_TYPE_IDENTITY:
             return "Identity";
@@ -95,7 +92,7 @@ const char* get_eap_type() {
     return "(unknown)";
 }
 
-void eapol_show_message() {
+static void eapol_show_message() {
     printf("EAP Message\n");
     printf("Code: %s (%d)\n", get_eap_code(), eap_code);
     printf("Indentifier: %d\n", eap_id);
@@ -105,10 +102,10 @@ void eapol_show_message() {
     for (int i = 0; i < eap_length; ++i) {
         printf("%02x ", eap_packet[i]);
     }
-    printf("\n");
+    printf("\n---------------------------------------------------\n");
 }
 
-void eapol_parse_packet() {
+static void eapol_parse_packet() {
     eap_packet = eapol_buf + EAPOL_HEADER_SIZE;
     eap_length = (eapol_buf[2] << 8) | eapol_buf[3];
     eap_code = eapol_buf[4];
@@ -116,8 +113,8 @@ void eapol_parse_packet() {
     eap_type = eapol_buf[8];
 }
 
-int eapol_send_packet(int fd, int len, struct sockaddr_ll* addr) {
-    return sendto(fd, eapol_buf, len, 0, (struct sockaddr*) &addr, sizeof(struct sockaddr_ll)) == len;
+static int eapol_send_packet(int fd, int len, struct sockaddr_ll* addr) {
+    return sendto(fd, eapol_buf, len, 0, (struct sockaddr*) addr, sizeof(struct sockaddr_ll)) == len;
 }
 
 /*
@@ -126,7 +123,7 @@ int eapol_send_packet(int fd, int len, struct sockaddr_ll* addr) {
  */
 
 void eapol_init_addr(struct sockaddr_ll* addr, const char* ifname) {
-    memset(&addr, 0, sizeof(struct sockaddr_ll));
+    memset(addr, 0, sizeof(struct sockaddr_ll));
     addr->sll_family = AF_PACKET;
     addr->sll_protocol = htons(ETH_P_PAE);
     addr->sll_ifindex = if_nametoindex(ifname);
@@ -150,8 +147,10 @@ int eapol_start(int fd, struct sockaddr_ll* addr) {
     return eapol_send_packet(fd, EAPOL_HEADER_SIZE, addr);
 }
 
-int eapol_request_username(int fd, struct sockaddr_ll* addr, uchar* id) {
-    if (recvfrom(fd, eapol_buf, EAPOL_BUF_SIZE, 0, (struct sockaddr*) &addr, NULL) == -1) {
+int eapol_request_username(int fd, struct sockaddr_ll* addr, uint8_t* id) {
+    socklen_t len = sizeof(struct sockaddr_ll);
+
+    if (recvfrom(fd, eapol_buf, EAPOL_BUF_SIZE, 0, (struct sockaddr*) addr, &len) == -1) {
         return -1;
     }
 
@@ -167,7 +166,7 @@ int eapol_request_username(int fd, struct sockaddr_ll* addr, uchar* id) {
     return 0;
 }
 
-int eapol_response_username(int fd, struct sockaddr_ll* addr, const char* username, const uchar id) {
+int eapol_response_username(int fd, struct sockaddr_ll* addr, const char* username, const uint8_t id) {
     const int u_len = strlen(username);
     const int m_len = EAP_HEADER_SIZE + u_len;
     const int s_len = EAPOL_HEADER_SIZE + m_len;
@@ -187,12 +186,11 @@ int eapol_response_username(int fd, struct sockaddr_ll* addr, const char* userna
     return eapol_send_packet(fd, s_len, addr);
 }
 
-
 /*
  * only support MD5-Challenge
  */
 
-int eapol_request_challenge(int fd, uchar* id, uchar* buf, int* buf_len) {
+int eapol_request_challenge(int fd, uint8_t* id, uint8_t* buf, int* buf_len) {
     if (recvfrom(fd, eapol_buf, EAPOL_BUF_SIZE, 0, NULL, NULL) == -1) {
         return -1;
     }
@@ -212,13 +210,13 @@ int eapol_request_challenge(int fd, uchar* id, uchar* buf, int* buf_len) {
 
     *id = eap_id;
     *buf_len = v_size;
-    memcpy(eapol_buf + 10, buf, v_size);
+    memcpy(buf, eapol_buf + 10, v_size);
 
     return 0;
 }
 
-int eapol_response_challenge(int fd, struct sockaddr_ll* addr, uchar id, uchar* buf, int buf_len) {
-    const int m_len = EAP_HEADER_SIZE + buf_len;
+int eapol_response_challenge(int fd, struct sockaddr_ll* addr, uint8_t id, uint8_t* buf, int buf_len) {
+    const int m_len = EAP_HEADER_SIZE + buf_len + 1;
     const int s_len = EAPOL_HEADER_SIZE + m_len;
 
     eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
@@ -232,7 +230,7 @@ int eapol_response_challenge(int fd, struct sockaddr_ll* addr, uchar id, uchar* 
     eapol_buf[7] = eapol_buf[3];
     eapol_buf[8] = EAP_TYPE_MD5;
     eapol_buf[9] = buf_len;
-    memcpy(eapol_buf + 10, buf, 16);
+    memcpy(eapol_buf + 10, buf, buf_len);
 
     return eapol_send_packet(fd, s_len, addr);
 }
@@ -252,7 +250,7 @@ int eapol_result(int fd) {
     return 0;
 }
 
-void eapol_keep_alive(int fd, struct sockaddr_ll* addr, uchar type, int sec) {
+void eapol_keep_alive(int fd, struct sockaddr_ll* addr, uint8_t type, int sec) {
     eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
     eapol_buf[1] = type;
     eapol_buf[2] = 0x00;

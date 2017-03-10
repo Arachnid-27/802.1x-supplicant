@@ -1,22 +1,19 @@
 #include <errno.h>
-#include <stdio.h>
-#include <sys/socket.h>
-#include <openssl/md5.h>
 #include <stdlib.h>
-#include <unistd.h>
 #include "eapol.h"
+#include "md5.h"
 
 void md5_hash(unsigned char id, char* pwd, int p_len, unsigned char* val, int v_len, unsigned char* result) {
     char raw[1 + v_len + p_len];
-    MD5_CTX ctx;
+    struct md5_ctx ctx;
 
     raw[0] = id;
     memcpy(raw + 1, pwd, p_len);
     memcpy(raw + p_len + 1, val, v_len);
 
-    MD5_Init(&ctx);
-    MD5_Update(&ctx, raw, 1 + v_len + p_len);
-    MD5_Final(result, &ctx);
+    md5_init(&ctx);
+    md5_update(&ctx, (uint8_t *) raw, 1 + v_len + p_len);
+    md5_final(result, &ctx);
 }
 
 int main(int argc, char* argv[]) {
@@ -26,8 +23,8 @@ int main(int argc, char* argv[]) {
 
     int fd;
     int buf_len = 1024;
-    uchar buf[1024], data[1024];
-    uchar id;
+    uint8_t buf[1024], data[1024];
+    uint8_t id;
     struct sockaddr_ll addr, auth;
 
     if ((fd = socket(AF_PACKET, SOCK_DGRAM, htons(ETH_P_PAE))) == -1) {
