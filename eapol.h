@@ -51,6 +51,12 @@
 
 #define EAPOL_BUF_SIZE 2048
 
+#define pack(type, len)                     \
+    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;  \
+    eapol_buf[1] = type;                    \
+    eapol_buf[2] = (len >> 8) & 0xFF;       \
+    eapol_buf[3] = len & 0xFF;
+
 static uint8_t eapol_buf[EAPOL_BUF_SIZE];
 static uint8_t eap_code, eap_id, eap_type;
 static uint8_t *eap_packet;
@@ -117,6 +123,11 @@ static int eapol_send_packet(int fd, int len, struct sockaddr_ll* addr) {
     return sendto(fd, eapol_buf, len, 0, (struct sockaddr*) addr, sizeof(struct sockaddr_ll)) == len;
 }
 
+static int eapol_send_empty_packet(int fd, int type, struct sockaddr_ll* addr) {
+    pack(type, 0);
+    return sendto(fd, eapol_buf, EAPOL_HEADER_SIZE, 0, (struct sockaddr*) addr, sizeof(struct sockaddr_ll)) == EAPOL_HEADER_SIZE;
+}
+
 /*
  * set the addr of authenticator
  * MAC 01:80:c2:00:00:03
@@ -139,12 +150,7 @@ void eapol_init_addr(struct sockaddr_ll* addr, const char* ifname) {
 }
 
 int eapol_start(int fd, struct sockaddr_ll* addr) {
-    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
-    eapol_buf[1] = EAPOL_TYPE_START;
-    eapol_buf[2] = 0x00;
-    eapol_buf[3] = 0x00;
-
-    return eapol_send_packet(fd, EAPOL_HEADER_SIZE, addr);
+    return eapol_send_empty_packet(fd, EAPOL_TYPE_START, addr);
 }
 
 int eapol_request_username(int fd, struct sockaddr_ll* addr, uint8_t* id) {
@@ -171,10 +177,7 @@ int eapol_response_username(int fd, struct sockaddr_ll* addr, const char* userna
     const int m_len = EAP_HEADER_SIZE + u_len;
     const int s_len = EAPOL_HEADER_SIZE + m_len;
     
-    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
-    eapol_buf[1] = EAPOL_TYPE_PACKET;
-    eapol_buf[2] = (m_len >> 8) & 0xFF;
-    eapol_buf[3] = m_len & 0xFF;
+    pack(EAPOL_TYPE_PACKET, m_len);
 
     eapol_buf[4] = EAP_CODE_RESPONSE;
     eapol_buf[5] = id;
@@ -219,10 +222,7 @@ int eapol_response_challenge(int fd, struct sockaddr_ll* addr, uint8_t id, uint8
     const int m_len = EAP_HEADER_SIZE + buf_len + 1;
     const int s_len = EAPOL_HEADER_SIZE + m_len;
 
-    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
-    eapol_buf[1] = EAPOL_TYPE_PACKET;
-    eapol_buf[2] = (m_len >> 8) & 0xFF;
-    eapol_buf[3] = m_len & 0xFF;
+    pack(EAPOL_TYPE_PACKET, m_len);
 
     eapol_buf[4] = EAP_CODE_RESPONSE;
     eapol_buf[5] = id;
@@ -250,23 +250,10 @@ int eapol_result(int fd) {
     return 0;
 }
 
-void eapol_keep_alive(int fd, struct sockaddr_ll* addr, uint8_t type, int sec) {
-    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
-    eapol_buf[1] = type;
-    eapol_buf[2] = 0x00;
-    eapol_buf[3] = 0x00;
-
-    while (1) {
-        eapol_send_packet(fd, EAPOL_HEADER_SIZE, addr);
-        sleep(sec);
-    }
+void eapol_keep_alive(int fd, struct sockaddr_ll* addr, uint8_t type) {
+    eapol_send_empty_packet(fd, type, addr);
 }
 
 int eapol_log_off(int fd, struct sockaddr_ll* addr) {
-    eapol_buf[0] = EAPOL_PROTOCOL_VERSION;
-    eapol_buf[1] = EAPOL_TYPE_LOGOFF;
-    eapol_buf[2] = 0x00;
-    eapol_buf[3] = 0x00;
-
-    return eapol_send_packet(fd, EAPOL_HEADER_SIZE, addr);
+    return eapol_send_empty_packet(fd, EAPOL_TYPE_LOGOFF, addr);
 }
